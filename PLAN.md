@@ -53,14 +53,14 @@ STARK_PROJECTS_DIR=       # Path to your local projects folder e.g. ~/projects
 **Goal:** Speak → transcribed → Claude Haiku responds → spoken back. Under 2 seconds end to end.
 
 Tasks:
-- [ ] Initialize Python project with FastAPI, install dependencies (anthropic, elevenlabs, pyttsx3/kokoro, keyboard, sqlite3) — Done when: `pip install -r requirements.txt` succeeds with no errors
-- [ ] Set up project structure: `server.py`, `memory.py`, `voice.py`, `claude_runner.py`, `frontend/index.html` — Done when: all files exist with stubs
-- [ ] Build WebSocket endpoint in FastAPI that receives transcript text and returns a response — Done when: sending a message over WebSocket returns a Claude Haiku reply
-- [ ] Build frontend: microphone button, Web Speech API integration, WebSocket connection, text display — Done when: browser can capture voice and display transcript
-- [ ] Integrate ElevenLabs TTS — send Claude reply text, receive audio, play it back in browser — Done when: Stark speaks responses out loud
-- [ ] Add Kokoro/pyttsx3 as TTS fallback — automatically used when ElevenLabs API call fails or quota is exceeded — Done when: fallback triggers silently without crashing
-- [ ] Add hotkey trigger (configurable in .env) to focus the browser tab or toggle listening — Done when: pressing the hotkey activates voice input without clicking
-- [ ] Write CLAUDE.md explaining project structure for future Claude Code sessions — Done when: file exists with accurate setup instructions
+- [x] Initialize Python project with FastAPI, install dependencies (anthropic, elevenlabs, pyttsx3/kokoro, keyboard, sqlite3) — Done when: `pip install -r requirements.txt` succeeds with no errors
+- [x] Set up project structure: `server.py`, `memory.py`, `voice.py`, `claude_runner.py`, `frontend/index.html` — Done when: all files exist with stubs
+- [x] Build WebSocket endpoint in FastAPI that receives transcript text and returns a response — Done when: sending a message over WebSocket returns a Claude Haiku reply
+- [x] Build frontend: microphone button, Web Speech API integration, WebSocket connection, text display — Done when: browser can capture voice and display transcript
+- [x] Integrate ElevenLabs TTS — send Claude reply text, receive audio, play it back in browser — Done when: Stark speaks responses out loud
+- [x] Add Kokoro/pyttsx3 as TTS fallback — automatically used when ElevenLabs API call fails or quota is exceeded — Done when: fallback triggers silently without crashing
+- [x] Add hotkey trigger (configurable in .env) to focus the browser tab or toggle listening — Done when: pressing the hotkey activates voice input without clicking
+- [x] Write CLAUDE.md explaining project structure for future Claude Code sessions — Done when: file exists with accurate setup instructions
 
 ---
 

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stark</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #e8e8e8;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 2rem;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 400;
+      letter-spacing: 0.3em;
+      color: #555;
+      text-transform: uppercase;
+    }
+
+    #orb-wrap {
+      position: relative;
+      width: 140px;
+      height: 140px;
+    }
+
+    #orb {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 38% 36%, #1a1a2e, #0a0a14);
+      border: 1.5px solid #222;
+      cursor: pointer;
+      transition: box-shadow 0.2s, transform 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #orb:hover { transform: scale(1.04); }
+
+    #orb.listening {
+      box-shadow:
+        0 0 0 3px #3b82f6,
+        0 0 24px 8px rgba(59, 130, 246, 0.35);
+      animation: pulse-blue 1.4s ease-in-out infinite;
+    }
+
+    #orb.speaking {
+      box-shadow:
+        0 0 0 3px #10b981,
+        0 0 24px 8px rgba(16, 185, 129, 0.35);
+      animation: pulse-green 1.0s ease-in-out infinite;
+    }
+
+    #orb.thinking {
+      box-shadow:
+        0 0 0 3px #f59e0b,
+        0 0 24px 8px rgba(245, 158, 11, 0.25);
+    }
+
+    #orb.error {
+      box-shadow:
+        0 0 0 3px #ef4444,
+        0 0 16px 6px rgba(239, 68, 68, 0.3);
+    }
+
+    @keyframes pulse-blue {
+      0%, 100% { box-shadow: 0 0 0 3px #3b82f6, 0 0 24px 8px rgba(59,130,246,0.35); }
+      50%       { box-shadow: 0 0 0 6px #3b82f6, 0 0 36px 14px rgba(59,130,246,0.5); }
+    }
+    @keyframes pulse-green {
+      0%, 100% { box-shadow: 0 0 0 3px #10b981, 0 0 24px 8px rgba(16,185,129,0.35); }
+      50%       { box-shadow: 0 0 0 6px #10b981, 0 0 36px 14px rgba(16,185,129,0.5); }
+    }
+
+    #orb-icon {
+      font-size: 2.4rem;
+      pointer-events: none;
+    }
+
+    #status {
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      color: #444;
+      text-transform: uppercase;
+      min-height: 1.1em;
+      transition: color 0.2s;
+    }
+    #status.active { color: #3b82f6; }
+    #status.speaking { color: #10b981; }
+    #status.error { color: #ef4444; }
+
+    #transcript-box {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .msg {
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      line-height: 1.55;
+      max-width: 88%;
+      animation: fadein 0.2s ease;
+    }
+    @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+    .msg.user {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #aaa;
+      align-self: flex-end;
+    }
+
+    .msg.stark {
+      background: #0f1a2e;
+      border: 1px solid #1e3a5f;
+      color: #c5d8f0;
+      align-self: flex-start;
+    }
+
+    .msg.err {
+      background: #1a0a0a;
+      border: 1px solid #5f1e1e;
+      color: #f0a0a0;
+      align-self: flex-start;
+    }
+
+    #hint {
+      font-size: 0.68rem;
+      color: #333;
+      letter-spacing: 0.08em;
+      text-align: center;
+    }
+
+    #no-speech-warning {
+      display: none;
+      background: #1a1000;
+      border: 1px solid #5f4000;
+      color: #c8a020;
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      max-width: 560px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Stark</h1>
+
+  <div id="orb-wrap">
+    <div id="orb" title="Click to speak (or press Space)">
+      <span id="orb-icon">⬡</span>
+    </div>
+  </div>
+
+  <div id="status">connecting…</div>
+
+  <div id="no-speech-warning">
+    Web Speech API requires Chrome or Edge. Firefox is not supported.
+  </div>
+
+  <div id="transcript-box"></div>
+
+  <div id="hint">click orb · space · or Ctrl+Shift+S from anywhere</div>
+
+<script>
+(() => {
+  // ── State ──────────────────────────────────────────────────────────────────
+  let ws = null;
+  let recognition = null;
+  let isListening = false;
+  let reconnectTimer = null;
+
+  const orb      = document.getElementById('orb');
+  const orbIcon  = document.getElementById('orb-icon');
+  const statusEl = document.getElementById('status');
+  const box      = document.getElementById('transcript-box');
+  const warning  = document.getElementById('no-speech-warning');
+
+  // ── Speech Recognition ────────────────────────────────────────────────────
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    warning.style.display = 'block';
+  } else {
+    recognition = new SR();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      isListening = true;
+      setOrb('listening');
+      setStatus('listening…', 'active');
+    };
+
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript.trim();
+      if (!transcript) return;
+      addMsg(transcript, 'user');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'transcript', text: transcript }));
+        setOrb('thinking');
+        setStatus('thinking…', '');
+      }
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      if (orb.className === 'listening') {
+        setOrb('');
+        setStatus('ready', '');
+      }
+    };
+
+    recognition.onerror = (e) => {
+      isListening = false;
+      if (e.error === 'no-speech') {
+        setOrb('');
+        setStatus('ready', '');
+      } else {
+        setOrb('error');
+        setStatus('mic error: ' + e.error, 'error');
+      }
+    };
+  }
+
+  function startListening() {
+    if (!recognition) return;
+    if (isListening) return;
+    try { recognition.start(); } catch(_) {}
+  }
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+    ws.onopen = () => {
+      clearTimeout(reconnectTimer);
+      setStatus('ready', '');
+      setOrb('');
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+
+      if (data.type === 'start_listening') {
+        startListening();
+      } else if (data.type === 'response') {
+        addMsg(data.text, 'stark');
+        if (data.audio) playAudio(data.audio, data.audio_format || 'audio/wav');
+      } else if (data.type === 'error') {
+        addMsg('⚠ ' + data.message, 'err');
+        setOrb('error');
+        setStatus('error', 'error');
+        setTimeout(() => { setOrb(''); setStatus('ready', ''); }, 3000);
+      }
+    };
+
+    ws.onclose = () => {
+      setStatus('reconnecting…', '');
+      setOrb('');
+      reconnectTimer = setTimeout(connect, 2000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  // ── Audio Playback ────────────────────────────────────────────────────────
+  function playAudio(b64, mimeType) {
+    setOrb('speaking');
+    setStatus('speaking…', 'speaking');
+    try {
+      const binary = atob(b64);
+      const buf = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+      const blob = new Blob([buf], { type: mimeType });
+      const url  = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setOrb('');
+        setStatus('ready', '');
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setOrb('error');
+        setStatus('audio error', 'error');
+        setTimeout(() => { setOrb(''); setStatus('ready', ''); }, 2000);
+      };
+      audio.play().catch((e) => {
+        console.warn('Autoplay blocked:', e);
+        setOrb('');
+        setStatus('ready (tap to hear)', '');
+      });
+    } catch (e) {
+      console.error('playAudio error:', e);
+    }
+  }
+
+  // ── UI Helpers ────────────────────────────────────────────────────────────
+  function setOrb(state) {
+    orb.className = state;
+    orbIcon.textContent = state === 'listening' ? '◉'
+                        : state === 'speaking'  ? '▶'
+                        : state === 'thinking'  ? '◌'
+                        : state === 'error'     ? '✕'
+                        : '⬡';
+  }
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || '';
+  }
+
+  function addMsg(text, role) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + role;
+    el.textContent = text;
+    box.appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    // Keep last 20 messages
+    while (box.children.length > 20) box.removeChild(box.firstChild);
+  }
+
+  // ── Event Listeners ───────────────────────────────────────────────────────
+  orb.addEventListener('click', () => {
+    if (isListening) return;
+    startListening();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && e.target === document.body) {
+      e.preventDefault();
+      if (!isListening) startListening();
+    }
+  });
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  connect();
+})();
+</script>
+</body>
+</html>
