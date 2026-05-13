@@ -1,3 +1,9 @@
+"""Stark — FastAPI server.
+
+WebSocket /ws handles the full voice loop:
+  transcript → intent detection → Claude Haiku / memory / Claude Code → TTS → audio
+"""
+
 import asyncio
 import base64
 import json
@@ -6,14 +12,18 @@ import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
+import claude_runner
 import memory
+import projects
 import voice
 
 load_dotenv()
@@ -25,10 +35,11 @@ app = FastAPI(title="Stark")
 executor = ThreadPoolExecutor(max_workers=4)
 
 _loop: asyncio.AbstractEventLoop | None = None
-
 _user_name = os.getenv("STARK_USER_NAME", "")
 
-# ── Intent detection patterns ─────────────────────────────────────────────────
+
+# ─────────────────────────── Intent patterns ──────────────────────────────────
+
 _RE_REMEMBER = re.compile(
     r"^(hey\s+stark[,\s]+)?(please\s+)?"
     r"(remember|save|note|keep in mind)\s+(that\s+|this[:\s]+)?(.+)",
@@ -39,12 +50,38 @@ _RE_FORGET = re.compile(
     r"(forget|delete|remove|erase)\s+(about\s+|that\s+)?(.+)",
     re.I | re.S,
 )
+_RE_CODE = re.compile(
+    r"^(hey\s+stark[,\s]+)?"
+    r"(work on|continue( working on)?|start|open|code on|run|launch|resume)\s+"
+    r"(my\s+)?(.+)",
+    re.I | re.S,
+)
+_RE_REGISTER = re.compile(
+    r"^(hey\s+stark[,\s]+)?"
+    r"(register|add)\s+(project\s+)?(?P<name>.+?)\s+at\s+(?P<path>.+)",
+    re.I | re.S,
+)
+_RE_LIST_PROJECTS = re.compile(
+    r"(list|show|what).*(project|repo|know about)",
+    re.I,
+)
+_RE_YES = re.compile(r"^(yes|yeah|yep|do it|go ahead|confirm|sure|ok|okay)[\.\!]?$", re.I)
+_RE_NO  = re.compile(r"^(no|nope|cancel|stop|never mind|don't|abort)[\.\!]?$", re.I)
 
 
-# ── WebSocket connection manager ──────────────────────────────────────────────
+# ─────────────────────────── Connection manager ───────────────────────────────
+
+@dataclass
+class PendingSpawn:
+    project_name: str
+    repo_path: str
+    instruction: str
+
+
 class ConnectionManager:
     def __init__(self):
         self.active: set[WebSocket] = set()
+        self._pending: dict[int, PendingSpawn] = {}  # keyed by id(ws)
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -53,6 +90,7 @@ class ConnectionManager:
 
     def disconnect(self, ws: WebSocket):
         self.active.discard(ws)
+        self._pending.pop(id(ws), None)
         logger.info("Client disconnected. Total: %d", len(self.active))
 
     async def broadcast(self, message: dict):
@@ -64,12 +102,22 @@ class ConnectionManager:
                 dead.add(ws)
         self.active -= dead
 
+    def set_pending(self, ws: WebSocket, spawn: PendingSpawn):
+        self._pending[id(ws)] = spawn
+
+    def get_pending(self, ws: WebSocket) -> PendingSpawn | None:
+        return self._pending.get(id(ws))
+
+    def clear_pending(self, ws: WebSocket):
+        self._pending.pop(id(ws), None)
+
 
 manager = ConnectionManager()
-_anthropic = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
-# ── Prompt helpers ────────────────────────────────────────────────────────────
+# ─────────────────────────── Prompt helpers ───────────────────────────────────
+
 _BASE_SYSTEM = (
     "You are Stark, a sharp, witty voice assistant built for a developer"
     + (f" named {_user_name}" if _user_name else "")
@@ -79,19 +127,17 @@ _BASE_SYSTEM = (
 )
 
 
-def _build_system(memories: list[dict]) -> str:
-    if not memories:
+def _build_system(mems: list[dict]) -> str:
+    if not mems:
         return _BASE_SYSTEM
-    mem_lines = "\n".join(f"- {m['key']}: {m['value']}" for m in memories)
-    return (
-        _BASE_SYSTEM
-        + f"\n\nRelevant memories from previous sessions:\n{mem_lines}"
-    )
+    lines = "\n".join(f"- {m['key']}: {m['value']}" for m in mems)
+    return _BASE_SYSTEM + f"\n\nRelevant memories from previous sessions:\n{lines}"
 
 
-# ── Claude helpers ────────────────────────────────────────────────────────────
-def _claude(text: str, system: str, max_tokens: int = 512) -> str:
-    msg = _anthropic.messages.create(
+# ─────────────────────────── Claude helpers ───────────────────────────────────
+
+def _claude_call(text: str, system: str, max_tokens: int = 512) -> str:
+    msg = _anthropic_client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=max_tokens,
         system=system,
@@ -102,7 +148,7 @@ def _claude(text: str, system: str, max_tokens: int = 512) -> str:
 
 async def _get_reply(text: str, system: str) -> str:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, _claude, text, system, 512)
+    return await loop.run_in_executor(executor, _claude_call, text, system, 512)
 
 
 async def _get_tts(text: str) -> tuple[bytes, str]:
@@ -111,73 +157,145 @@ async def _get_tts(text: str) -> tuple[bytes, str]:
 
 
 async def _send_spoken(ws: WebSocket, text: str) -> None:
-    """Synthesise text, send it over WebSocket, log it."""
     logger.info("Response: %s", text)
     audio_bytes, audio_format = await _get_tts(text)
-    await ws.send_json(
-        {
-            "type": "response",
-            "text": text,
-            "audio": base64.b64encode(audio_bytes).decode(),
-            "audio_format": audio_format,
-        }
-    )
+    await ws.send_json({
+        "type": "response",
+        "text": text,
+        "audio": base64.b64encode(audio_bytes).decode(),
+        "audio_format": audio_format,
+    })
 
 
-# ── Memory command handling ───────────────────────────────────────────────────
-async def _handle_remember(ws: WebSocket, raw_content: str) -> None:
-    """Extract key/value with Claude and persist the memory."""
-    extract_system = (
-        "You are a memory extraction assistant. "
-        "Given a statement the user wants to remember, extract a short topic key "
-        "and the fact to remember. Return ONLY valid JSON in this exact shape: "
-        '{"key": "short topic label", "value": "the fact"}\n'
+# ─────────────────────────── Intent handlers ─────────────────────────────────
+
+async def _handle_remember(ws: WebSocket, raw: str) -> None:
+    extract_sys = (
+        "Extract a concise topic key and the fact from this memory statement. "
+        "Return ONLY valid JSON: {\"key\": \"short topic\", \"value\": \"the fact\"}.\n"
         "Examples:\n"
-        '  "I use Next.js for my portfolio" → {"key": "portfolio tech stack", "value": "uses Next.js"}\n'
-        '  "my dog is called Biscuit" → {"key": "dog name", "value": "Biscuit"}\n'
-        '  "the API key lives in .env" → {"key": "API key location", "value": "stored in .env"}'
+        "  'I use Next.js for my portfolio' → {\"key\": \"portfolio tech stack\", \"value\": \"uses Next.js\"}\n"
+        "  'my dog is called Biscuit' → {\"key\": \"dog name\", \"value\": \"Biscuit\"}"
     )
     loop = asyncio.get_event_loop()
     raw_json = await loop.run_in_executor(
-        executor, _claude, raw_content, extract_system, 100
+        executor, _claude_call, raw, extract_sys, 100
     )
-
     try:
-        # Tolerate ```json ... ``` fences
         clean = re.sub(r"```[a-z]*\n?|\n?```", "", raw_json).strip()
         parsed = json.loads(clean)
         key = str(parsed["key"]).strip()
         value = str(parsed["value"]).strip()
     except Exception as e:
-        logger.warning("Memory extraction parse failed: %s — raw: %s", e, raw_json)
+        logger.warning("Memory extraction failed: %s — raw: %s", e, raw_json)
         await _send_spoken(ws, "Sorry, I couldn't figure out what to remember there.")
         return
 
     await loop.run_in_executor(executor, memory.save, key, value)
-    logger.info("Memory saved — key: %r  value: %r", key, value)
+    logger.info("Memory saved — %r: %r", key, value)
     await _send_spoken(ws, f"Got it. I'll remember that {value}.")
 
 
 async def _handle_forget(ws: WebSocket, query: str) -> None:
-    """Delete the best-matching memory and confirm, or say not found."""
     loop = asyncio.get_event_loop()
     deleted = await loop.run_in_executor(executor, memory.delete_matching, query)
-
     if deleted:
-        logger.info("Memory deleted — key: %r", deleted["key"])
+        logger.info("Memory deleted — %r", deleted["key"])
         await _send_spoken(ws, f"Done. I've forgotten about {deleted['key']}.")
     else:
         await _send_spoken(ws, "I don't have anything stored about that.")
 
 
-# ── WebSocket endpoint ────────────────────────────────────────────────────────
+async def _handle_code_intent(ws: WebSocket, raw_name: str) -> None:
+    """Resolve project, build confirmation message, arm pending spawn."""
+    project_name = raw_name.strip().rstrip(".")
+    loop = asyncio.get_event_loop()
+    repo_path = await loop.run_in_executor(executor, projects.resolve, project_name)
+
+    if not repo_path:
+        await _send_spoken(
+            ws,
+            f"I don't have {project_name} in my project registry. "
+            "You can add it by saying: register project name at path.",
+        )
+        return
+
+    instruction = claude_runner.build_instruction(repo_path)
+    using_resume = claude_runner.has_plan(repo_path)
+    plan_note = "the resume command" if using_resume else "a generic prompt"
+
+    display_name = projects.closest_name(project_name) or project_name
+    confirm_text = (
+        f"I'll run Claude Code on {display_name} using {plan_note}. Shall I?"
+    )
+    manager.set_pending(ws, PendingSpawn(
+        project_name=display_name,
+        repo_path=repo_path,
+        instruction=instruction,
+    ))
+    await _send_spoken(ws, confirm_text)
+
+
+async def _handle_confirmation(ws: WebSocket, text: str) -> bool:
+    """Handle yes/no for a pending spawn. Returns True if the text was consumed."""
+    pending = manager.get_pending(ws)
+    if not pending:
+        return False
+
+    if _RE_YES.match(text):
+        manager.clear_pending(ws)
+        loop = asyncio.get_event_loop()
+        proc = await loop.run_in_executor(
+            executor,
+            lambda: claude_runner.run(
+                pending.repo_path, pending.instruction, new_window=True
+            ),
+        )
+        if proc:
+            await _send_spoken(
+                ws, f"Launching Claude Code on {pending.project_name}. Good luck."
+            )
+        else:
+            await _send_spoken(
+                ws,
+                "I couldn't start Claude Code. Make sure the claude CLI is installed and on PATH.",
+            )
+        return True
+
+    if _RE_NO.match(text):
+        manager.clear_pending(ws)
+        await _send_spoken(ws, "Cancelled.")
+        return True
+
+    # Anything else — cancel and treat as new request
+    manager.clear_pending(ws)
+    return False
+
+
+async def _handle_register(ws: WebSocket, name: str, path: str) -> None:
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(executor, projects.add, name, path)
+    await _send_spoken(ws, f"Registered {name}. You can now say 'work on {name}'.")
+
+
+async def _handle_list_projects(ws: WebSocket) -> None:
+    loop = asyncio.get_event_loop()
+    reg = await loop.run_in_executor(executor, projects.list_projects)
+    if not reg:
+        await _send_spoken(ws, "No projects registered yet.")
+        return
+    names = ", ".join(reg.keys())
+    await _send_spoken(ws, f"I know about: {names}.")
+
+
+# ─────────────────────────── WebSocket endpoint ───────────────────────────────
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
     try:
         while True:
             data = await ws.receive_json()
-
             if data.get("type") != "transcript":
                 continue
 
@@ -188,24 +306,44 @@ async def websocket_endpoint(ws: WebSocket):
             logger.info("Transcript: %s", text)
 
             try:
-                # ── Check for remember intent ──────────────────────────────
+                # ── 1. Pending confirmation (yes / no) ─────────────────────
+                consumed = await _handle_confirmation(ws, text)
+                if consumed:
+                    continue
+
+                # ── 2. Remember intent ─────────────────────────────────────
                 m = _RE_REMEMBER.match(text)
                 if m:
                     await _handle_remember(ws, m.group(5).strip())
                     continue
 
-                # ── Check for forget intent ────────────────────────────────
+                # ── 3. Forget intent ───────────────────────────────────────
                 m = _RE_FORGET.match(text)
                 if m:
                     await _handle_forget(ws, m.group(5).strip())
                     continue
 
-                # ── Normal conversation with memory injection ──────────────
+                # ── 4. Register project ────────────────────────────────────
+                m = _RE_REGISTER.match(text)
+                if m:
+                    await _handle_register(ws, m.group("name").strip(), m.group("path").strip())
+                    continue
+
+                # ── 5. List projects ───────────────────────────────────────
+                if _RE_LIST_PROJECTS.search(text):
+                    await _handle_list_projects(ws)
+                    continue
+
+                # ── 6. Code / work-on intent ───────────────────────────────
+                m = _RE_CODE.match(text)
+                if m:
+                    await _handle_code_intent(ws, m.group(5).strip())
+                    continue
+
+                # ── 7. Normal conversation (memory-augmented) ──────────────
                 loop = asyncio.get_event_loop()
-                recent_mems = await loop.run_in_executor(
-                    executor, memory.recall, text, 5
-                )
-                system = _build_system(recent_mems)
+                mems = await loop.run_in_executor(executor, memory.recall, text, 5)
+                system = _build_system(mems)
                 reply = await _get_reply(text, system)
                 await _send_spoken(ws, reply)
 
@@ -220,7 +358,8 @@ async def websocket_endpoint(ws: WebSocket):
         manager.disconnect(ws)
 
 
-# ── Hotkey setup ──────────────────────────────────────────────────────────────
+# ─────────────────────────── Hotkey setup ─────────────────────────────────────
+
 def _setup_hotkey():
     hotkey = os.getenv("STARK_HOTKEY", "ctrl+shift+s")
     try:
@@ -248,7 +387,8 @@ async def startup():
     threading.Thread(target=_setup_hotkey, daemon=True).start()
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ─────────────────────────── Routes ───────────────────────────────────────────
+
 @app.get("/")
 async def index():
     return FileResponse(Path(__file__).parent / "frontend" / "index.html")
@@ -259,8 +399,13 @@ async def health():
     return JSONResponse({"status": "ok"})
 
 
-# ── Dev entry point ───────────────────────────────────────────────────────────
+@app.get("/projects")
+async def api_projects():
+    return JSONResponse(projects.list_projects())
+
+
+# ─────────────────────────── Dev entry point ──────────────────────────────────
+
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

@@ -80,11 +80,11 @@ Tasks:
 **Goal:** Stark spawns real Claude Code sessions from voice commands.
 
 Tasks:
-- [ ] Build `claude_runner.py` — takes a repo path + instruction string, spawns `claude "<instruction>"` as a subprocess in that directory — Done when: function runs a Claude Code session in a given repo and streams output to terminal
-- [ ] Build project registry — a JSON or SQLite table mapping project names to local paths e.g. `{"portfolio": "~/projects/portfolio"}` — Done when: Stark knows where each project lives
-- [ ] Add voice intent detection for coding commands — "work on [project]", "continue [project]", "start [project]" → maps to the right repo and spawns Claude Code with the resume command — Done when: saying "work on my portfolio" opens a Claude Code session in the right directory
-- [ ] Add PLAN.md awareness — when spawning a session, Stark checks if PLAN.md exists and uses the resume command; if not, uses a generic instruction — Done when: projects with PLAN.md get the correct resume command automatically
-- [ ] Confirm before spawning — Stark reads back what it's about to run and waits for voice confirmation — Done when: "work on stark" triggers "I'll run Claude Code on stark with the resume command. Shall I?" before executing
+- [x] Build `claude_runner.py` — takes a repo path + instruction string, spawns `claude "<instruction>"` as a subprocess in that directory — Done when: function runs a Claude Code session in a given repo and streams output to terminal
+- [x] Build project registry — a JSON or SQLite table mapping project names to local paths e.g. `{"portfolio": "~/projects/portfolio"}` — Done when: Stark knows where each project lives
+- [x] Add voice intent detection for coding commands — "work on [project]", "continue [project]", "start [project]" → maps to the right repo and spawns Claude Code with the resume command — Done when: saying "work on my portfolio" opens a Claude Code session in the right directory
+- [x] Add PLAN.md awareness — when spawning a session, Stark checks if PLAN.md exists and uses the resume command; if not, uses a generic instruction — Done when: projects with PLAN.md get the correct resume command automatically
+- [x] Confirm before spawning — Stark reads back what it's about to run and waits for voice confirmation — Done when: "work on stark" triggers "I'll run Claude Code on stark with the resume command. Shall I?" before executing
 
 ---
 
