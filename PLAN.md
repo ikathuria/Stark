@@ -92,11 +92,11 @@ Tasks:
 **Goal:** Trigger the full project planning flow hands-free. "I have a new idea" → intake questions → research → PLAN.md.
 
 Tasks:
-- [ ] Add planning mode trigger — "I have an idea", "let's plan something", "new project" → switches Stark into planning mode with Claude Sonnet — Done when: trigger phrase activates a distinct planning conversation context
-- [ ] Implement voice-driven intake — Stark asks the 5 planning questions one at a time, waits for voice answers, stores them — Done when: all 5 answers are captured in a structured object
-- [ ] Run market research — after intake, Stark uses Claude Sonnet with web search to research competitors, feasibility, free stack options — Done when: research summary is spoken back and saved
-- [ ] Generate PLAN.md — Stark writes the full plan file using the gathered context and saves it to the new project directory — Done when: PLAN.md exists in `~/projects/<project-name>/PLAN.md`
-- [ ] Register new project — automatically adds the new project to the project registry — Done when: the new project is immediately accessible via "work on [project name]"
+- [x] Add planning mode trigger — "I have an idea", "let's plan something", "new project" → switches Stark into planning mode with Claude Sonnet — Done when: trigger phrase activates a distinct planning conversation context
+- [x] Implement voice-driven intake — Stark asks the 5 planning questions one at a time, waits for voice answers, stores them — Done when: all 5 answers are captured in a structured object
+- [x] Run market research — after intake, Stark uses Claude Sonnet with web search to research competitors, feasibility, free stack options — Done when: research summary is spoken back and saved
+- [x] Generate PLAN.md — Stark writes the full plan file using the gathered context and saves it to the new project directory — Done when: PLAN.md exists in `~/projects/<project-name>/PLAN.md`
+- [x] Register new project — automatically adds the new project to the project registry — Done when: the new project is immediately accessible via "work on [project name]"
 
 ---
 

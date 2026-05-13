@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 import claude_runner
 import memory
+import planner as planning
 import projects
 import voice
 
@@ -67,6 +68,11 @@ _RE_LIST_PROJECTS = re.compile(
 )
 _RE_YES = re.compile(r"^(yes|yeah|yep|do it|go ahead|confirm|sure|ok|okay)[\.\!]?$", re.I)
 _RE_NO  = re.compile(r"^(no|nope|cancel|stop|never mind|don't|abort)[\.\!]?$", re.I)
+_RE_PLAN_TRIGGER = re.compile(
+    r"\b(i have (a |an )?(new )?idea|let'?s plan|new project|plan (a |an |something|this)|"
+    r"i want to build|i('?m| am) building|help me plan)\b",
+    re.I,
+)
 
 
 # ─────────────────────────── Connection manager ───────────────────────────────
@@ -81,7 +87,8 @@ class PendingSpawn:
 class ConnectionManager:
     def __init__(self):
         self.active: set[WebSocket] = set()
-        self._pending: dict[int, PendingSpawn] = {}  # keyed by id(ws)
+        self._pending: dict[int, PendingSpawn] = {}          # keyed by id(ws)
+        self._planning: dict[int, planning.PlanningSession] = {}
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -91,6 +98,7 @@ class ConnectionManager:
     def disconnect(self, ws: WebSocket):
         self.active.discard(ws)
         self._pending.pop(id(ws), None)
+        self._planning.pop(id(ws), None)
         logger.info("Client disconnected. Total: %d", len(self.active))
 
     async def broadcast(self, message: dict):
@@ -110,6 +118,17 @@ class ConnectionManager:
 
     def clear_pending(self, ws: WebSocket):
         self._pending.pop(id(ws), None)
+
+    def start_planning(self, ws: WebSocket) -> planning.PlanningSession:
+        session = planning.PlanningSession()
+        self._planning[id(ws)] = session
+        return session
+
+    def get_planning(self, ws: WebSocket) -> planning.PlanningSession | None:
+        return self._planning.get(id(ws))
+
+    def clear_planning(self, ws: WebSocket):
+        self._planning.pop(id(ws), None)
 
 
 manager = ConnectionManager()
@@ -278,6 +297,56 @@ async def _handle_register(ws: WebSocket, name: str, path: str) -> None:
     await _send_spoken(ws, f"Registered {name}. You can now say 'work on {name}'.")
 
 
+async def _handle_plan_trigger(ws: WebSocket) -> None:
+    """Enter planning mode and ask the first question."""
+    session = manager.start_planning(ws)
+    await _send_spoken(
+        ws,
+        "Alright, let's plan this out. I'll ask you five quick questions. "
+        + session.current_question,
+    )
+
+
+async def _handle_plan_answer(ws: WebSocket, session: planning.PlanningSession, text: str) -> None:
+    """Record an answer; ask the next question or kick off research when done."""
+    session.record(text)
+
+    if not session.done:
+        await _send_spoken(ws, session.current_question)
+        return
+
+    # All 5 answers collected — run research + generate PLAN.md
+    manager.clear_planning(ws)
+    project_name = session.project_name()
+
+    await _send_spoken(
+        ws,
+        f"Perfect. Give me a moment while I research {project_name} and put together a plan.",
+    )
+
+    loop = asyncio.get_event_loop()
+    try:
+        research = await loop.run_in_executor(executor, planning.conduct_research, session)
+        plan_md  = await loop.run_in_executor(executor, planning.generate_plan_md, session, research)
+        plan_path = await loop.run_in_executor(executor, planning.save_plan, session, plan_md)
+
+        # Auto-register the project
+        await loop.run_in_executor(executor, projects.add, project_name, str(plan_path.parent))
+
+        # Speak a summary of the research
+        spoken_summary = research[:600]  # stay within reasonable TTS length
+        await _send_spoken(
+            ws,
+            f"Done. Here's what I found: {spoken_summary} "
+            f"I've written the PLAN.md to {plan_path} and registered {project_name} in your projects. "
+            f"Say 'work on {project_name}' when you're ready to start.",
+        )
+
+    except Exception as e:
+        logger.error("Planning failed: %s", e, exc_info=True)
+        await _send_spoken(ws, f"Sorry, something went wrong while planning: {e}")
+
+
 async def _handle_list_projects(ws: WebSocket) -> None:
     loop = asyncio.get_event_loop()
     reg = await loop.run_in_executor(executor, projects.list_projects)
@@ -306,41 +375,52 @@ async def websocket_endpoint(ws: WebSocket):
             logger.info("Transcript: %s", text)
 
             try:
-                # ── 1. Pending confirmation (yes / no) ─────────────────────
+                # ── 1. Active planning session (capture answers in order) ──
+                plan_session = manager.get_planning(ws)
+                if plan_session:
+                    await _handle_plan_answer(ws, plan_session, text)
+                    continue
+
+                # ── 2. Pending confirmation (yes / no) ─────────────────────
                 consumed = await _handle_confirmation(ws, text)
                 if consumed:
                     continue
 
-                # ── 2. Remember intent ─────────────────────────────────────
+                # ── 3. Remember intent ─────────────────────────────────────
                 m = _RE_REMEMBER.match(text)
                 if m:
                     await _handle_remember(ws, m.group(5).strip())
                     continue
 
-                # ── 3. Forget intent ───────────────────────────────────────
+                # ── 4. Forget intent ───────────────────────────────────────
                 m = _RE_FORGET.match(text)
                 if m:
                     await _handle_forget(ws, m.group(5).strip())
                     continue
 
-                # ── 4. Register project ────────────────────────────────────
+                # ── 5. Register project ────────────────────────────────────
                 m = _RE_REGISTER.match(text)
                 if m:
                     await _handle_register(ws, m.group("name").strip(), m.group("path").strip())
                     continue
 
-                # ── 5. List projects ───────────────────────────────────────
+                # ── 6. List projects ───────────────────────────────────────
                 if _RE_LIST_PROJECTS.search(text):
                     await _handle_list_projects(ws)
                     continue
 
-                # ── 6. Code / work-on intent ───────────────────────────────
+                # ── 7. Code / work-on intent ───────────────────────────────
                 m = _RE_CODE.match(text)
                 if m:
                     await _handle_code_intent(ws, m.group(5).strip())
                     continue
 
-                # ── 7. Normal conversation (memory-augmented) ──────────────
+                # ── 8. Planning mode trigger ───────────────────────────────
+                if _RE_PLAN_TRIGGER.search(text):
+                    await _handle_plan_trigger(ws)
+                    continue
+
+                # ── 9. Normal conversation (memory-augmented) ──────────────
                 loop = asyncio.get_event_loop()
                 mems = await loop.run_in_executor(executor, memory.recall, text, 5)
                 system = _build_system(mems)
