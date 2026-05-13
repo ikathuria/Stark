@@ -68,11 +68,11 @@ Tasks:
 **Goal:** Stark remembers things across sessions — project names, decisions, preferences, anything you tell it to remember.
 
 Tasks:
-- [ ] Set up SQLite database with FTS5 full-text search — Done when: `memory.db` is created on first run
-- [ ] Create `memory.py` with `save(key, value)`, `recall(query)`, `list_all()` functions — Done when: unit tests pass for all three
-- [ ] Wire memory into the conversation: inject recent relevant memories into Claude Haiku's system prompt on each turn — Done when: Stark references a fact you told it in a previous session
-- [ ] Add explicit "remember" trigger — if user says "remember that..." Stark saves it and confirms — Done when: "remember I'm using Next.js for my portfolio" persists and is recalled next session
-- [ ] Add "forget" trigger — user can remove specific memories — Done when: "forget about X" removes the entry and confirms
+- [x] Set up SQLite database with FTS5 full-text search — Done when: `memory.db` is created on first run
+- [x] Create `memory.py` with `save(key, value)`, `recall(query)`, `list_all()` functions — Done when: unit tests pass for all three
+- [x] Wire memory into the conversation: inject recent relevant memories into Claude Haiku's system prompt on each turn — Done when: Stark references a fact you told it in a previous session
+- [x] Add explicit "remember" trigger — if user says "remember that..." Stark saves it and confirms — Done when: "remember I'm using Next.js for my portfolio" persists and is recalled next session
+- [x] Add "forget" trigger — user can remove specific memories — Done when: "forget about X" removes the entry and confirms
 
 ---
 
