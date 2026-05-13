@@ -114,11 +114,11 @@ Tasks:
 **Goal:** Clean enough for someone else to clone and run. Ready to put on GitHub.
 
 Tasks:
-- [ ] Add `config.json` or `.env.example` with all configurable options documented — Done when: a new user can set up Stark with only that file
-- [ ] Write detailed README — what it does, how to install, how to add projects, how to use each mode — Done when: README covers all milestones' features
-- [ ] Update CLAUDE.md with final project structure so future Claude Code sessions can navigate it — Done when: running `claude "read CLAUDE.md and add X feature"` works without confusion
-- [ ] Error handling pass — every external call (ElevenLabs, Anthropic, subprocess) has a graceful fallback and user-facing voice error message — Done when: pulling the network cable doesn't crash Stark
-- [ ] GitHub release — tag v0.1.0, write release notes — Done when: repo is public with a release
+- [x] Add `config.json` or `.env.example` with all configurable options documented — Done when: a new user can set up Stark with only that file
+- [x] Write detailed README — what it does, how to install, how to add projects, how to use each mode — Done when: README covers all milestones' features
+- [x] Update CLAUDE.md with final project structure so future Claude Code sessions can navigate it — Done when: running `claude "read CLAUDE.md and add X feature"` works without confusion
+- [x] Error handling pass — every external call (ElevenLabs, Anthropic, subprocess) has a graceful fallback and user-facing voice error message — Done when: pulling the network cable doesn't crash Stark
+- [x] GitHub release — tag v0.1.0, write release notes — Done when: repo is public with a release
 
 ---
 

@@ -192,14 +192,20 @@ async def _get_tts(text: str) -> tuple[bytes, str]:
 
 
 async def _send_spoken(ws: WebSocket, text: str) -> None:
+    """Send a response with TTS audio. Degrades to text-only if TTS fails."""
     logger.info("Response: %s", text)
-    audio_bytes, audio_format = await _get_tts(text)
-    await ws.send_json({
-        "type": "response",
-        "text": text,
-        "audio": base64.b64encode(audio_bytes).decode(),
-        "audio_format": audio_format,
-    })
+    try:
+        audio_bytes, audio_format = await _get_tts(text)
+        await ws.send_json({
+            "type": "response",
+            "text": text,
+            "audio": base64.b64encode(audio_bytes).decode(),
+            "audio_format": audio_format,
+        })
+    except Exception as e:
+        logger.warning("TTS failed (%s) — sending text-only response", e)
+        # Send text without audio so the user still sees the reply
+        await ws.send_json({"type": "response", "text": text, "audio": None, "audio_format": None})
 
 
 # ─────────────────────────── Intent handlers ─────────────────────────────────
