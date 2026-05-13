@@ -104,9 +104,9 @@ Tasks:
 **Goal:** Open apps, read the screen, switch context — the basics.
 
 Tasks:
-- [ ] App launcher — "open VS Code", "open terminal", "open Chrome" → uses `subprocess` / `os.system` to launch apps — Done when: 5 common apps launch correctly by voice
-- [ ] Screen reader — "what's on my screen" → takes screenshot, sends to Claude Sonnet vision, speaks the summary — Done when: Stark accurately describes an active window
-- [ ] Project briefing — "what am I working on" or "brief me" → Stark reads project registry, checks PLAN.md files, gives a spoken summary of active projects and next tasks — Done when: morning briefing covers all registered projects with their next incomplete task
+- [x] App launcher — "open VS Code", "open terminal", "open Chrome" → uses `subprocess` / `os.system` to launch apps — Done when: 5 common apps launch correctly by voice
+- [x] Screen reader — "what's on my screen" → takes screenshot, sends to Claude Sonnet vision, speaks the summary — Done when: Stark accurately describes an active window
+- [x] Project briefing — "what am I working on" or "brief me" → Stark reads project registry, checks PLAN.md files, gives a spoken summary of active projects and next tasks — Done when: morning briefing covers all registered projects with their next incomplete task
 
 ---
 

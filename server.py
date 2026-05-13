@@ -22,6 +22,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
 import claude_runner
+import computer
 import memory
 import planner as planning
 import projects
@@ -68,6 +69,21 @@ _RE_LIST_PROJECTS = re.compile(
 )
 _RE_YES = re.compile(r"^(yes|yeah|yep|do it|go ahead|confirm|sure|ok|okay)[\.\!]?$", re.I)
 _RE_NO  = re.compile(r"^(no|nope|cancel|stop|never mind|don't|abort)[\.\!]?$", re.I)
+_RE_OPEN_APP = re.compile(
+    r"^(hey\s+stark[,\s]+)?(please\s+)?"
+    r"(open|launch|start|run)\s+(?P<app>.+)",
+    re.I,
+)
+_RE_SCREEN = re.compile(
+    r"(what('?s| is)( on)? (my )?screen|what (can|do) (you |i )?see|"
+    r"describe (my |the )?screen|read (my |the )?screen)",
+    re.I,
+)
+_RE_BRIEF = re.compile(
+    r"(brief( me)?|what am i working on|morning briefing|"
+    r"what('?s| is) (my |the )?status|what (do I|should I) work on)",
+    re.I,
+)
 _RE_PLAN_TRIGGER = re.compile(
     r"\b(i have (a |an )?(new )?idea|let'?s plan|new project|plan (a |an |something|this)|"
     r"i want to build|i('?m| am) building|help me plan)\b",
@@ -297,6 +313,32 @@ async def _handle_register(ws: WebSocket, name: str, path: str) -> None:
     await _send_spoken(ws, f"Registered {name}. You can now say 'work on {name}'.")
 
 
+async def _handle_open_app(ws: WebSocket, app_name: str) -> None:
+    loop = asyncio.get_event_loop()
+    ok = await loop.run_in_executor(executor, computer.launch, app_name)
+    if ok:
+        await _send_spoken(ws, f"Opening {app_name}.")
+    else:
+        await _send_spoken(
+            ws,
+            f"I don't know how to open {app_name}. "
+            "Try the full name, like 'VS Code' or 'Google Chrome'.",
+        )
+
+
+async def _handle_screen_read(ws: WebSocket) -> None:
+    await _send_spoken(ws, "Let me take a look.")
+    loop = asyncio.get_event_loop()
+    description = await loop.run_in_executor(executor, computer.describe_screen)
+    await _send_spoken(ws, description)
+
+
+async def _handle_briefing(ws: WebSocket) -> None:
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(executor, computer.briefing)
+    await _send_spoken(ws, summary)
+
+
 async def _handle_plan_trigger(ws: WebSocket) -> None:
     """Enter planning mode and ask the first question."""
     session = manager.start_planning(ws)
@@ -415,12 +457,28 @@ async def websocket_endpoint(ws: WebSocket):
                     await _handle_code_intent(ws, m.group(5).strip())
                     continue
 
-                # ── 8. Planning mode trigger ───────────────────────────────
+                # ── 8. Open app ───────────────────────────────────────────
+                m = _RE_OPEN_APP.match(text)
+                if m:
+                    await _handle_open_app(ws, m.group("app").strip())
+                    continue
+
+                # ── 9. Screen reader ───────────────────────────────────────
+                if _RE_SCREEN.search(text):
+                    await _handle_screen_read(ws)
+                    continue
+
+                # ── 10. Project briefing ───────────────────────────────────
+                if _RE_BRIEF.search(text):
+                    await _handle_briefing(ws)
+                    continue
+
+                # ── 11. Planning mode trigger ──────────────────────────────
                 if _RE_PLAN_TRIGGER.search(text):
                     await _handle_plan_trigger(ws)
                     continue
 
-                # ── 9. Normal conversation (memory-augmented) ──────────────
+                # ── 12. Normal conversation (memory-augmented) ─────────────
                 loop = asyncio.get_event_loop()
                 mems = await loop.run_in_executor(executor, memory.recall, text, 5)
                 system = _build_system(mems)
