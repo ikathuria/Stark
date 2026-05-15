@@ -54,7 +54,7 @@ _RE_FORGET = re.compile(
 )
 _RE_CODE = re.compile(
     r"^(hey\s+stark[,\s]+)?"
-    r"(work on|continue( working on)?|start|open|code on|run|launch|resume)\s+"
+    r"(work on|continue( working on)?|start|code on|launch|resume)\s+"
     r"(my\s+)?(.+)",
     re.I | re.S,
 )
@@ -64,11 +64,13 @@ _RE_REGISTER = re.compile(
     re.I | re.S,
 )
 _RE_LIST_PROJECTS = re.compile(
-    r"(list|show|what).*(project|repo|know about)",
+    r"(list|show)\s+(my\s+)?(project|repo)s?"
+    r"|what (project|repo)s"
+    r"|which (project|repo)s",
     re.I,
 )
-_RE_YES = re.compile(r"^(yes|yeah|yep|do it|go ahead|confirm|sure|ok|okay)[\.\!]?$", re.I)
-_RE_NO  = re.compile(r"^(no|nope|cancel|stop|never mind|don't|abort)[\.\!]?$", re.I)
+_RE_YES = re.compile(r"^(yes|yeah|yep|sure|ok|okay|go ahead|do it|confirm|sounds good)([\s,\.\!].*)?$", re.I)
+_RE_NO  = re.compile(r"^(no|nope|cancel|stop|abort|never mind|don.?t)([\s,\.\!].*)?$", re.I)
 _RE_OPEN_APP = re.compile(
     r"^(hey\s+stark[,\s]+)?(please\s+)?"
     r"(open|launch|start|run)\s+(?P<app>.+)",
@@ -457,16 +459,16 @@ async def websocket_endpoint(ws: WebSocket):
                     await _handle_list_projects(ws)
                     continue
 
-                # ── 7. Code / work-on intent ───────────────────────────────
-                m = _RE_CODE.match(text)
-                if m:
-                    await _handle_code_intent(ws, m.group(5).strip())
-                    continue
-
-                # ── 8. Open app ───────────────────────────────────────────
+                # ── 7. Open app (checked before code — 'open' is in both) ─
                 m = _RE_OPEN_APP.match(text)
                 if m:
                     await _handle_open_app(ws, m.group("app").strip())
+                    continue
+
+                # ── 8. Code / work-on intent ───────────────────────────────
+                m = _RE_CODE.match(text)
+                if m:
+                    await _handle_code_intent(ws, m.group(5).strip())
                     continue
 
                 # ── 9. Screen reader ───────────────────────────────────────

@@ -36,7 +36,7 @@ def has_plan(repo_path: str | Path) -> bool:
     return (Path(repo_path) / "PLAN.md").is_file()
 
 
-def build_instruction(repo_path: str | Path, instruction: str | None) -> str:
+def build_instruction(repo_path: str | Path, instruction: str | None = None) -> str:
     """Return the instruction to pass to Claude Code.
 
     If no explicit instruction is given and the repo has a PLAN.md, use the
